@@ -79,16 +79,28 @@ const TypingDots = () => (
   </div>
 );
 
+const parseInline = (text) => {
+  const parts = [];
+  const regex = /\*\*(.*?)\*\*|\*(.*?)\*/g;
+  let last = 0, m;
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    if (m[1] !== undefined) parts.push(<strong key={m.index}>{m[1]}</strong>);
+    else parts.push(<em key={m.index}>{m[2]}</em>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+};
+
 const formatMessage = (text) => {
   const lines = text.split("\n");
   return lines.map((line, i) => {
-    line = line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-    line = line.replace(/\*(.*?)\*/g, "<em>$1</em>");
-    if (line.startsWith("### ")) return <h3 key={i} style={{ margin: "8px 0 4px", fontSize: "0.95rem", color: "#c8a96e" }}>{line.slice(4)}</h3>;
-    if (line.startsWith("## ")) return <h2 key={i} style={{ margin: "10px 0 4px", fontSize: "1rem", color: "#e8d5a3" }}>{line.slice(3)}</h2>;
-    if (line.startsWith("- ")) return <div key={i} style={{ paddingLeft: 12, marginBottom: 2 }}>• {line.slice(2)}</div>;
+    if (line.startsWith("### ")) return <h3 key={i} style={{ margin: "8px 0 4px", fontSize: "0.95rem", color: "#c8a96e" }}>{parseInline(line.slice(4))}</h3>;
+    if (line.startsWith("## ")) return <h2 key={i} style={{ margin: "10px 0 4px", fontSize: "1rem", color: "#e8d5a3" }}>{parseInline(line.slice(3))}</h2>;
+    if (line.startsWith("- ")) return <div key={i} style={{ paddingLeft: 12, marginBottom: 2 }}>• {parseInline(line.slice(2))}</div>;
     if (line.trim() === "") return <div key={i} style={{ height: 6 }} />;
-    return <div key={i} dangerouslySetInnerHTML={{ __html: line }} />;
+    return <div key={i}>{parseInline(line)}</div>;
   });
 };
 
@@ -115,6 +127,11 @@ export default function App() {
 
     try {
       const apiKey = process.env.REACT_APP_ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Falta configurar la API Key en Vercel. Ve a tu proyecto en vercel.com → Settings → Environment Variables y agrega REACT_APP_ANTHROPIC_API_KEY." }]);
+        setLoading(false);
+        return;
+      }
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -131,9 +148,13 @@ export default function App() {
         }),
       });
       const data = await res.json();
+      if (data.error) {
+        setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ Error de API: ${data.error.message}. Verifica tu API Key en Vercel.` }]);
+        return;
+      }
       const reply = data.content?.find((b) => b.type === "text")?.text || "Lo siento, hubo un error. ¿Puedes repetir tu pregunta?";
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-    } catch {
+    } catch (err) {
       setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Hubo un problema de conexión. Por favor intenta de nuevo." }]);
     } finally {
       setLoading(false);
