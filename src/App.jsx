@@ -104,6 +104,41 @@ const formatMessage = (text) => {
   });
 };
 
+// Extrae datos del cliente de la conversación y los envía al webhook
+const extractAndSendLead = async (messages) => {
+  const webhookUrl = process.env.REACT_APP_WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  const fullConversation = messages.map(m => `${m.role === "user" ? "Cliente" : "Don Segurito"}: ${m.content}`).join("\n");
+
+  // Extrae campos clave con regex simple
+  const getText = (pattern) => { const m = fullConversation.match(pattern); return m ? m[1].trim() : ""; };
+  const nombre    = getText(/(?:nombre(?:\s+completo)?(?:\s+es)?[:\s]+)([A-Za-záéíóúÁÉÍÓÚñÑ\s]{3,40})/i);
+  const whatsapp  = getText(/(?:whatsapp|celular|número|numero|teléfono|telefono)[:\s]+([+\d\s\-]{7,15})/i);
+  const vehiculo  = getText(/(?:marca(?:\s+y\s+modelo)?(?:\s+es)?|tengo un|vehículo(?:\s+es)?)[:\s]+([A-Za-z0-9\s]{3,30})/i);
+  const anio      = getText(/(?:año(?:\s+es)?|modelo)[:\s]+(\d{4})/i);
+  const uso       = getText(/(?:uso(?:\s+es)?|uso\s+principal)[:\s]+(particular|comercial)/i);
+  const ciudad    = getText(/(?:ciudad(?:\s+es)?|vivo en|ciudad donde vive)[:\s]+([A-Za-záéíóúÁÉÍÓÚñÑ\s]{3,25})/i);
+  const plan      = getText(/(?:plan\s+)(básico|estándar|premium)/i);
+
+  // Solo envía si tiene al menos nombre o WhatsApp
+  if (!nombre && !whatsapp) return;
+
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fecha: new Date().toLocaleString("es-PE", { timeZone: "America/Lima" }),
+        nombre, whatsapp, vehiculo, anio, uso, ciudad,
+        plan_interesado: plan || "Por definir",
+      }),
+    });
+  } catch (e) {
+    console.log("Webhook error:", e);
+  }
+};
+
 export default function App() {
   const [messages, setMessages] = useState([{
     role: "assistant",
@@ -141,7 +176,7 @@ export default function App() {
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
+          model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
           system: SYSTEM_PROMPT,
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
@@ -153,7 +188,10 @@ export default function App() {
         return;
       }
       const reply = data.content?.find((b) => b.type === "text")?.text || "Lo siento, hubo un error. ¿Puedes repetir tu pregunta?";
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+      const updatedMessages = [...newMessages, { role: "assistant", content: reply }];
+      setMessages(updatedMessages);
+      // Envía datos al webhook si la conversación tiene info de cotización
+      await extractAndSendLead(updatedMessages);
     } catch (err) {
       setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Hubo un problema de conexión. Por favor intenta de nuevo." }]);
     } finally {
